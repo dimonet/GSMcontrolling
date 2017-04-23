@@ -3,7 +3,7 @@
 class MyGSM
 {
   public: 
-    MyGSM(byte gsmLED);
+    MyGSM(byte gsmLED, byte pinBOOT);
     void Initialize();    
     bool Available();
     bool NewRing;
@@ -17,7 +17,7 @@ class MyGSM
     bool SendSms(String *text, String *phone);         // метод возвращает true если смс отправлен успешно
     bool Call(String *phone);
     void RejectCall();    
-    bool RequestGsmCode(String *code);                 // запрос gsm кода (*#)
+    bool RequestUssd(String *code);                 // запрос gsm кода (*#)
     void Refresh();
     void ClearRing();
     void ClearSms();
@@ -28,5 +28,6 @@ class MyGSM
     bool IsAvailable();                               // ожидание готовности gsm модуля
     void BlinkLED(unsigned int millisBefore, unsigned int millisHIGH, unsigned int millisAfter);
     void SetString(String *source, String *target);
-    int _gsmLED;     
+    int _gsmLED;
+    int _pinBOOT;                                     // нога BOOT или K на модеме       
 };

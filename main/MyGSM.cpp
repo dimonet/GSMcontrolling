@@ -1,17 +1,20 @@
 #include "MyGSM.h"
 #include "Arduino.h"
 
-//#include <SoftwareSerial.h>                   // если программный
+#include <SoftwareSerial.h>                   // если программный
 
-#define serial Serial                           // если аппаратный в UNO
-//#define serial Serial1                        // если аппаратный в леонардо
+//#define serial Serial                           // если аппаратный в UNO
+SoftwareSerial serial(2, 3); // RX, TX
+
+#define debug Serial                           // если аппаратный в UNO
 
 #define GSM_TIMEOUT 60000                       // врем ожидание готовности модема (милсек)  
 #define SMS_LIMIT   150                         // максимальное куличество символов в смс (большео лимита все символы обрезается)
 
-MyGSM::MyGSM(byte gsmLED)
+MyGSM::MyGSM(byte gsmLED, byte pinBOOT)
 {
-  _gsmLED = gsmLED; 
+  _gsmLED = gsmLED;
+  _pinBOOT = pinBOOT;
   ClearRing();
   ClearSms();
   ClearUssd();  
@@ -21,8 +24,10 @@ MyGSM::MyGSM(byte gsmLED)
 void MyGSM::Initialize()
 {
   serial.begin(9600);                      // незабываем указать скорость работы UART модема
+  debug.begin(9600);
   delay(1000);                            
-  digitalWrite(_gsmLED, HIGH);             // на время включаем лед    
+  digitalWrite(_gsmLED, HIGH);             // на время включаем лед  
+  digitalWrite(_pinBOOT, LOW);             // включаем модем   
   delay(2000);                             // нужно дождатся включения модема и соединения с сетью
   
   serial.println("ATE0");                  // выключаем эхо  
@@ -113,14 +118,12 @@ void MyGSM::RejectCall()
 }
 
 // запрос gsm кода (*#) 
-bool MyGSM::RequestGsmCode(String *code)
+bool MyGSM::RequestUssd(String *code)
 {
-  if (code->startsWith("*") == -1 || code->indexOf('#') == -1 || code->indexOf('#') < code->startsWith("*"))
-    return false;
-  while (serial.available()) serial.read();
-  BlinkLED(0, 250, 0);
-  serial.println("ATD" + *code);
-  //serial.println("AT+CUSD=1,\"" + *code + "\"");
+  if (!IsAvailable()) return false;                   // ждем готовности модема и если он не ответил то прырываем запрос 
+  delay(100);                                         // для некоторых gsm модулей (SIM800l) обязательно необходима пауза между получением смс и отправкой Ussd запроса
+  BlinkLED(0, 250, 0);    
+  serial.println("AT+CUSD=1,\"" + *code + "\"");
   return true; 
 }
 
@@ -143,6 +146,7 @@ void MyGSM::Refresh()
   while (Available())
   {
     char currSymb = serial.read();    
+    debug.print(currSymb);
     if ('\r' == currSymb) 
     {
       if (strCount == 0)
@@ -240,7 +244,8 @@ void MyGSM::ClearUssd()
 }
 
 void MyGSM::Shutdown()
-{  
+{
+  digitalWrite(_pinBOOT, HIGH);                          // выключаем пинг который включает модем
   serial.println("AT+CPWROFF");                          // посылаем команду выключения gsm модема  
   delay(100);
 }

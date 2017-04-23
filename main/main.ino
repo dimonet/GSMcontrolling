@@ -10,12 +10,12 @@
 //// НАСТРОЕЧНЫЕ КОНСТАНТЫ /////
 const char sms_PIR1[]          PROGMEM = {"ALARM: PIR1 sensor."};                                 // текст смс для датчика движения 1
 
-const char sms_ErrorCommand[]    PROGMEM = {"Available commands:\nSendSMS,\nBalance,\nTest on/off,\nRedirect on/off,\nControl on/off,\nSkimpy,\nReboot,\nStatus,\nBalanceGSMcode,\nNotInContr,\nInContr,\nSmsCommand."};  // смс команда не распознана
+const char sms_ErrorCommand[]    PROGMEM = {"Available commands:\nSendSMS,\nBalance,\nTest on/off,\nRedirect on/off,\nControl on/off,\nSkimpy,\nReboot,\nStatus,\nBalanceUSSD,\nNotInContr,\nInContr,\nSmsCommand."};  // смс команда не распознана
 const char sms_RedirectOn[]      PROGMEM = {"Command: SMS redirection has been turned on."};                        // выполнена команда для включения перенаправления всех смс от любого отправителя на номер SMSNUMBER
 const char sms_RedirectOff[]     PROGMEM = {"Command: SMS redirection has been turned off."};                       // выполнена команда для выключения перенаправления всех смс от любого отправителя на номер SMSNUMBER
 const char sms_WasRebooted[]     PROGMEM = {"Command: Device was rebooted."};                                       // выполнена команда для коротковременного включения сирены
-const char sms_WrongGsmCommand[] PROGMEM = {"Command: Wrong GSM command."};                                         // сообщение о неправельной gsm комманде
-const char sms_BalanceGSMcode[]  PROGMEM = {"Command: GSM command for getting balance was changed to "};            // выполнена команда для замены gsm команды для получения баланса
+const char sms_WrongUssd[]       PROGMEM = {"Command: Wrong USSD command."};                                         // сообщение о неправельной gsm комманде
+const char sms_BalanceUssd[]     PROGMEM = {"Command: USSD command for getting balance was changed to "};            // выполнена команда для замены gsm команды для получения баланса
 const char sms_ErrorSendSms[]    PROGMEM = {"Command: Format of command should be next:\nSendSMS 'number' 'text'"}; // выполнена команда для отправки смс другому абоненту
 const char sms_SmsWasSent[]      PROGMEM = {"Command: Sms was sent."};                                              // выполнена команда для отправки смс другому абоненту
 
@@ -26,6 +26,8 @@ const char sms_SmsWasSent[]      PROGMEM = {"Command: Sms was sent."};          
 
 //// КОНСТАНТЫ ДЛЯ ПИНОВ /////
 #define gsmLED 13
+
+#define pinBOOT 5                             // нога BOOT или K на модеме 
 #define Button 9                              // нога на кнопку
 
 // Спикер
@@ -42,13 +44,13 @@ const char sms_SmsWasSent[]      PROGMEM = {"Command: Sms was sent."};          
 
 #define numSize            13                 // количество символов в строке телефонного номера
 
-#define E_BalanceGSMcode   70                 // GSM код для запроса баланца
+#define E_BalanceUssd      70                 // GSM код для запроса баланца
 
-#define E_NumberGsmCode    85                 // для промежуточного хранения номера телефона, от которого получено gsm код и которому необходимо отправить ответ (баланс и т.д.)
+#define E_NumberAnsUssd    85                 // для промежуточного хранения номера телефона, от которого получено gsm код и которому необходимо отправить ответ (баланс и т.д.)
 
-#define E_NUM1_InCall  100                    // 1-й номер для снятие с охраны
-#define E_NUM2_InCall  115                    // 2-й номер для снятие с охраны
-#define E_NUM3_InCall  130                    // 3-й номер для снятие с охраны
+#define E_NUM1_InCall      100                // 1-й номер для снятие с охраны
+#define E_NUM2_InCall      115                // 2-й номер для снятие с охраны
+#define E_NUM3_InCall      130                // 3-й номер для снятие с охраны
 
 #define E_NUM1_SmsCommand  145                // 1-й номер для управления через sms
 #define E_NUM2_SmsCommand  160                // 2-й номер для управления через sms
@@ -61,7 +63,7 @@ const char sms_SmsWasSent[]      PROGMEM = {"Command: Sms was sent."};          
 bool btnIsHolding = false;
 bool wasRebooted = false;                       // указываем была ли последний раз перезагрузка программным путем
 
-MyGSM gsm(gsmLED);                             // GSM модуль
+MyGSM gsm(gsmLED, pinBOOT);                             // GSM модуль
 
 void(* RebootFunc) (void) = 0;                          // объявляем функцию Reboot
 
@@ -71,6 +73,7 @@ void setup()
   debug.begin(9600);
   pinMode(SpecerPin, OUTPUT);
   pinMode(gsmLED, OUTPUT);
+  pinMode(pinBOOT, OUTPUT);                   // нога BOOT на модеме
   pinMode(pinPIR1, INPUT);                    // нога датчика движения 1
   pinMode(Button, INPUT_PULLUP);              // кнопка для установки режима охраны
    
@@ -122,6 +125,10 @@ void loop()
     EEPROM.write(E_wasRebooted, false);
   }
   
+  if (ButtonIsHold(0))
+  {
+    gsm.RequestUssd(&ReadFromEEPROM(E_BalanceUssd));
+  } 
   if (gsm.NewRing)                                                  // если обнаружен входящий звонок
   {
     if (NumberRead(E_NUM1_InCall).indexOf(gsm.RingNumber) > -1 ||  // если найден зарегистрированный звонок то поднимаем трубку
@@ -142,13 +149,17 @@ void loop()
   
   /*if (SensorTriggered_PIR1())                             // если сработал батчик
   {                                                                 
-  } */ 
+  } */   
   if (gsm.NewUssd)                                            // если доступный новый ответ на gsm команду
-  {    
-    gsm.SendSms(&gsm.UssdText, &NumberRead(E_NumberGsmCode)); // отправляем ответ на gsm команду
+  {   
+    if (gsm.UssdText.length() > 0)   
+      gsm.SendSms(&gsm.UssdText, &NumberRead(E_NumberAnsUssd)); // отправляем ответ на gsm команду
+    else
+      gsm.SendSms(&GetStringFromFlash(sms_WrongUssd), &NumberRead(E_NumberAnsUssd));    
+    
     gsm.ClearUssd();                                          // сбрасываем ответ на gsm команду 
   }
-  ExecSmsCommand();                                           // проверяем доступна ли новая команда по смс и если да то выполняем ее
+  ExecSmsCommand();                                           // проверяем доступна ли новая команда по смс и если да то выполняем ее  
 }
 
 
@@ -290,13 +301,11 @@ void ExecSmsCommand()
       gsm.SmsText.toLowerCase();                                                         // приводим весь текст команды к нижнему регистру что б было проще идентифицировать команду
       gsm.SmsText.trim();                                                                // удаляем пробелы в начале и в конце комманды
       
-      if (gsm.SmsText.startsWith("*"))                                                   // Если сообщение начинается на * то это gsm код
+      if (gsm.SmsText.startsWith("*") || gsm.SmsText.startsWith("#"))                                                   // Если сообщение начинается на * то это gsm код
       {
         PlayTone(specerTone, 250); 
-        if (gsm.RequestGsmCode(&gsm.SmsText))                                                                
-          WriteToEEPROM(E_NumberGsmCode, &gsm.SmsNumber);                                // сохраняем номер на который необходимо будет отправить ответ                                            
-        else
-          gsm.SendSms(&GetStringFromFlash(sms_WrongGsmCommand), &gsm.SmsNumber);         
+        gsm.RequestUssd(&gsm.SmsText);
+        WriteToEEPROM(E_NumberAnsUssd, &gsm.SmsNumber);                                  // сохраняем номер на который необходимо будет отправить ответ                                                    
       }
       else
       if (gsm.SmsText.startsWith("sendsms"))                                             // запрос на отправку смс другому абоненту
@@ -334,12 +343,8 @@ void ExecSmsCommand()
       if (gsm.SmsText == "balance")                                                      // запрос баланса
       {       
         PlayTone(specerTone, 250); 
-        if(gsm.RequestGsmCode(&ReadFromEEPROM(E_BalanceGSMcode)))
-          WriteToEEPROM(E_NumberGsmCode, &gsm.SmsNumber);                                // сохраняем номер на который необходимо будет отправить ответ           
-        else
-        {
-          gsm.SendSms(&GetStringFromFlash(sms_WrongGsmCommand), &gsm.SmsNumber);                                
-        }
+        gsm.RequestUssd(&ReadFromEEPROM(E_BalanceUssd));
+        WriteToEEPROM(E_NumberAnsUssd, &gsm.SmsNumber);                                // сохраняем номер на который необходимо будет отправить ответ                   
       }         
       else
       if (gsm.SmsText.startsWith("redirect on"))        
@@ -371,7 +376,7 @@ void ExecSmsCommand()
         gsm.SendSms(&msg, &gsm.SmsNumber);          
       }           
       else 
-      if(gsm.SmsText.startsWith("balancegsmcode"))
+      if(gsm.SmsText.startsWith("balanceussd"))
       {
         PlayTone(specerTone, 250);
         String str = gsm.SmsText;
@@ -379,8 +384,8 @@ void ExecSmsCommand()
         str = str.substring(beginStr + 1);
         int duration = str.indexOf('\'');  
         str = str.substring(0, duration);             
-        WriteToEEPROM(E_BalanceGSMcode, &str);
-        String msg = GetStringFromFlash(sms_BalanceGSMcode) + "'" + ReadFromEEPROM(E_BalanceGSMcode) + "'";
+        WriteToEEPROM(E_BalanceUssd, &str);
+        String msg = GetStringFromFlash(sms_BalanceUssd) + "'" + ReadFromEEPROM(E_BalanceUssd) + "'";
         gsm.SendSms(&msg, &gsm.SmsNumber);          
       }     
       else
